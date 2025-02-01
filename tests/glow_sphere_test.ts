@@ -8,12 +8,13 @@ import {
 import { assertEquals } from 'https://deno.land/std@0.90.0/testing/asserts.ts';
 
 Clarinet.test({
-    name: "Can create a new skincare routine",
+    name: "Can create a new public skincare routine",
     async fn(chain: Chain, accounts: Map<string, Account>) {
         const deployer = accounts.get('deployer')!;
         const routineName = "Morning Routine";
         const description = "My daily morning skincare routine";
         const products = ["Cleanser", "Toner", "Moisturizer"];
+        const isPublic = true;
 
         let block = chain.mineBlock([
             Tx.contractCall(
@@ -22,7 +23,8 @@ Clarinet.test({
                 [
                     types.ascii(routineName),
                     types.ascii(description),
-                    types.list(products.map(p => types.ascii(p)))
+                    types.list(products.map(p => types.ascii(p))),
+                    types.bool(isPublic)
                 ],
                 deployer.address
             )
@@ -41,13 +43,48 @@ Clarinet.test({
         const routine = getRoutine.result.expectSome().expectTuple();
         assertEquals(routine['name'], routineName);
         assertEquals(routine['description'], description);
+        assertEquals(routine['is-public'], isPublic);
+        assertEquals(routine['likes'], '0');
     }
 });
 
 Clarinet.test({
-    name: "Can add progress record to existing routine",
+    name: "Can follow another user",
+    async fn(chain: Chain, accounts: Map<string, Account>) {
+        const user1 = accounts.get('wallet_1')!;
+        const user2 = accounts.get('wallet_2')!;
+        
+        let block = chain.mineBlock([
+            Tx.contractCall(
+                'glow-sphere',
+                'follow-user',
+                [types.principal(user2.address)],
+                user1.address
+            )
+        ]);
+        
+        block.receipts[0].result.expectOk().expectBool(true);
+        
+        // Verify following status
+        let isFollowing = chain.callReadOnlyFn(
+            'glow-sphere',
+            'is-following',
+            [
+                types.principal(user1.address),
+                types.principal(user2.address)
+            ],
+            user1.address
+        );
+        
+        isFollowing.result.expectBool(true);
+    }
+});
+
+Clarinet.test({
+    name: "Can like a routine",
     async fn(chain: Chain, accounts: Map<string, Account>) {
         const deployer = accounts.get('deployer')!;
+        const user = accounts.get('wallet_1')!;
         
         // First create a routine
         let block = chain.mineBlock([
@@ -57,42 +94,36 @@ Clarinet.test({
                 [
                     types.ascii("Test Routine"),
                     types.ascii("Test Description"),
-                    types.list([types.ascii("Product 1")])
+                    types.list([types.ascii("Product 1")]),
+                    types.bool(true)
                 ],
                 deployer.address
             )
         ]);
         
-        const routineId = 1;
-        const note = "Skin feeling great today!";
-        const photoHash = "QmHash123";
-        
-        // Add progress record
-        let progressBlock = chain.mineBlock([
+        // Like the routine
+        let likeBlock = chain.mineBlock([
             Tx.contractCall(
                 'glow-sphere',
-                'add-progress-record',
-                [
-                    types.uint(routineId),
-                    types.ascii(note),
-                    types.ascii(photoHash)
-                ],
-                deployer.address
+                'like-routine',
+                [types.uint(1)],
+                user.address
             )
         ]);
         
-        progressBlock.receipts[0].result.expectOk().expectUint(1);
+        likeBlock.receipts[0].result.expectOk().expectBool(true);
         
-        // Verify progress record
-        let getRecord = chain.callReadOnlyFn(
+        // Verify like status
+        let hasLiked = chain.callReadOnlyFn(
             'glow-sphere',
-            'get-progress-record',
-            [types.uint(1)],
-            deployer.address
+            'has-liked-routine',
+            [
+                types.principal(user.address),
+                types.uint(1)
+            ],
+            user.address
         );
         
-        const record = getRecord.result.expectSome().expectTuple();
-        assertEquals(record['note'], note);
-        assertEquals(record['photo-hash'], photoHash);
+        hasLiked.result.expectBool(true);
     }
 });
