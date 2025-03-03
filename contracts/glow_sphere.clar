@@ -10,19 +10,27 @@
 (define-constant err-invalid-input (err u104))
 (define-constant err-already-liked (err u105))
 (define-constant err-already-following (err u106))
-
-;; [Previous map definitions remain unchanged...]
+(define-constant err-self-action (err u107))
+(define-constant err-empty-products (err u108))
 
 ;; Enhanced input validation
 (define-private (is-valid-string (s (string-ascii 500)))
     (> (len s) u0)
 )
 
-;; Create a new skincare routine with validation
+(define-private (is-valid-product-list (products (list 20 (string-ascii 50))))
+    (and
+        (> (len products) u0)
+        (fold and true (map is-valid-string products))
+    )
+)
+
+;; Create a new skincare routine with enhanced validation
 (define-public (create-routine (name (string-ascii 50)) (description (string-ascii 500)) (products (list 20 (string-ascii 50))) (is-public bool))
     (begin
         (asserts! (is-valid-string name) err-invalid-input)
         (asserts! (is-valid-string description) err-invalid-input)
+        (asserts! (is-valid-product-list products) err-empty-products)
         (let
             (
                 (new-routine-id (+ (var-get routine-id-nonce) u1))
@@ -35,13 +43,19 @@
     )
 )
 
-;; Fixed like-record function
+;; Get progress record
+(define-read-only (get-progress-record (record-id uint))
+    (map-get? progress-records record-id)
+)
+
+;; Enhanced like-record with self-like prevention
 (define-public (like-record (record-id uint))
     (let
         (
             (record (get-progress-record record-id))
         )
         (asserts! (is-some record) err-not-found)
+        (asserts! (not (is-eq tx-sender (get user (unwrap-panic record)))) err-self-action)
         (asserts! (not (has-liked-record tx-sender record-id)) err-already-liked)
         (try! (map-insert record-likes
             { user: tx-sender, record-id: record-id }
@@ -52,27 +66,14 @@
     )
 )
 
-;; Enhanced follow-user with duplicate check
-(define-public (follow-user (user principal))
-    (begin
-        (asserts! (not (is-eq tx-sender user)) err-unauthorized)
-        (asserts! (not (is-following tx-sender user)) err-already-following)
-        (try! (map-insert follows
-            { follower: tx-sender, following: user }
-            { timestamp: block-height }
-        ))
-        (try! (update-follow-stats tx-sender user))
-        (ok true)
-    )
-)
-
-;; Enhanced like-routine with duplicate check
+;; Enhanced like-routine with self-like prevention
 (define-public (like-routine (routine-id uint))
     (let
         (
             (routine (get-routine routine-id))
         )
         (asserts! (is-some routine) err-not-found)
+        (asserts! (not (is-eq tx-sender (get creator (unwrap-panic routine)))) err-self-action)
         (asserts! (not (has-liked-routine tx-sender routine-id)) err-already-liked)
         (try! (map-insert routine-likes
             { user: tx-sender, routine-id: routine-id }
@@ -82,5 +83,3 @@
         (ok true)
     )
 )
-
-;; [Remaining functions unchanged...]
